@@ -4,27 +4,24 @@ import struct
 import time
 from queue import Queue
 import datetime
-# 상태 정의
+import math
+
 SRS_TARGET_STATUS_STANDING = 0
 SRS_TARGET_STATUS_LYING = 1
 SRS_TARGET_STATUS_SITTING = 2
 SRS_TARGET_STATUS_FALL = 3
 SRS_TARGET_STATUS_UNKNOWN = 4
 
-# 데이터 큐 생성
 data_queue = Queue()
 
-# 포인트 정보 클래스
 class SRS_POINT_INFO:
     def __init__(self, data):
         self.posX, self.posY, self.posZ, self.doppler, self.power = struct.unpack('fffff', data)
 
-# 타겟 정보 클래스
 class SRS_TARGET_INFO:
     def __init__(self, data):
         self.posX, self.posY, self.status, self.id, *self.reserved = struct.unpack('ffIIIfff', data)
 
-# 상태 문자열 반환 함수
 def get_status_string(status):
     if status == SRS_TARGET_STATUS_STANDING:
         return "STANDING"
@@ -36,9 +33,8 @@ def get_status_string(status):
         return "FALL"
     else:
         return "UNKNOWN"
-# 유니티에 데이터 전송 함수
+
 def sendToUnity(target):
-   
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     serverAddressPort = ("127.0.0.1", 5051)
     id, posX, posY, status, time = target
@@ -46,7 +42,6 @@ def sendToUnity(target):
     sock.sendto(message.encode(), serverAddressPort)
     print(message)
 
-# 캡처 스레드
 class CaptureThread(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
@@ -64,53 +59,61 @@ class CaptureThread(threading.Thread):
                 packet_size = struct.unpack('I', header[16:20])[0]
                 data = sock.recv(packet_size)
                 if data:
-                    current_time_stamp = time.time()  # 패킷을 읽은 현재 시간
-                    data_queue.put((data, current_time_stamp))  # 데이터와 함께 시간을 큐에 추가
+                    current_time_stamp = time.time() 
+                    data_queue.put((data, current_time_stamp))
 
-# 처리 스레드
+                  
+
 class ProcessThread(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
         self.running = True
-
     def run(self):
-        last_sent_time = time.time()
         while self.running:
             if not data_queue.empty():
-                current_time = time.time()
-                if current_time - last_sent_time >= 1:  # 1초마다 데이터 전송
-                    data = data_queue.get()
-                    send_data = self.parse_data(data)
-                    if send_data:
-                        sendToUnity(send_data)
-                        last_sent_time = current_time
-                    data_queue.queue.clear()  # 큐 초기화
+                data = data_queue.get()
+                send_data = self.parse_data(data)
+                if send_data:
+                    sendToUnity(send_data)
+                data_queue.queue.clear() 
     def parse_data(self, packet):
-        data, timestamp = packet  # 패킷 데이터와 타임스탬프 추출
+        data, timestamp = packet  
         if len(data) < 16:
             return None
 
         current_date_time = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
 
         offset = 16
+        if len(data) < offset + 4:  
+            print("데이터 패킷이 너무 짧습니다. 필요한 길이: {}, 현재 길이: {}".format(offset + 4, len(data)))
+            return None
+
         target_num = struct.unpack('I', data[offset:offset+4])[0]
         offset += 4
-
         for _ in range(target_num):
-            if len(data) - offset < 32:
-                break
+            if len(data) - offset < 32:  
+                break  
             target_data = data[offset:offset+32]
             target = SRS_TARGET_INFO(target_data)
-            if(target.id<100 and target.id!=0):
+            if(get_status_string(target.status)!="UNKNOWN"):
+                if not (math.isclose(target.id, 0, abs_tol=1e-5) or 
+                        math.isclose(target.posX, 0, abs_tol=1e-5) or 
+                        math.isclose(target.posY, 0, abs_tol=1e-5)):
+                    if(target.id < 10 and target.id != 0):
+                        offset += 32
+                        return [target.id, target.posX, target.posY, get_status_string(target.status), current_date_time]
                 offset += 32
-                return [target.id, target.posX, target.posY, get_status_string(target.status), current_date_time]
-            else: offset += 32
+            else: 
+                offset += 32
+
+
         return None
+
 
 
 if __name__ == "__main__":
     process_thread = ProcessThread()
     process_thread.start()
-
+    
     capture_thread = CaptureThread()
     capture_thread.start()
