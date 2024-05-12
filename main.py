@@ -1,14 +1,15 @@
 import socket
 import struct
+import requests
 # Define constants
 SRS_SERVER_PORT = 29172
 SRS_MAX_POINT = 2000
 SRS_MAX_TARGET = 250
 
 
-app = Flask(__name__)
+
 # Ip address
-sourceIp = "192.168.0.9"
+sourceIp = "192.168.0.13"
 
 SRS_TARGET_STATUS_WALKING = 0
 SRS_TARGET_STATUS_LYING = 1
@@ -79,6 +80,18 @@ def sendToUnity(id, posX, posY, status):
     message = "{}|{}|{}|{}|{}".format(id, posX, posY, status,0)
     sock.sendto(message.encode(), serverAddressPort)
     print(message)
+
+def send_status_to_server(status):
+    url = "http://localhost:8080/status"
+    data = {"state": status}
+    try:
+        response = requests.post(url, json=data)
+        if response.status_code == 200:
+            print("Status successfully sent to server.")
+        else:
+            print("Failed to send status to server. Status code:", response.status_code)
+    except Exception as e:
+        print("An error occurred while sending status to server:", e)
 
 def main():
     packet_buffer = bytearray(512000)
@@ -192,6 +205,7 @@ def main():
                     status_str = "SITTING"
                 elif status == SRS_TARGET_STATUS_FALL:
                     status_str = "FALL"
+                    send_status_to_server("fall")
                 sendToUnity(target[step].id,target[step].posX,target[step].posY,status_str)
                 #print(f"Target[{step}] {{ID: {target[step].id}, X: {target[step].posX:3.2f}, Y: {target[step].posY:3.2f}, Status: {status_str} ({status})}}")
 
