@@ -1,6 +1,7 @@
 import socket
 import struct
 import requests
+import datetime
 # Define constants
 SRS_SERVER_PORT = 29172
 SRS_MAX_POINT = 2000
@@ -9,7 +10,7 @@ SRS_MAX_TARGET = 250
 
 
 # Ip address
-sourceIp = "192.168.0.13"
+sourceIp = "192.168.30.1"
 
 SRS_TARGET_STATUS_WALKING = 0
 SRS_TARGET_STATUS_LYING = 1
@@ -93,6 +94,29 @@ def send_status_to_server(status):
     except Exception as e:
         print("An error occurred while sending status to server:", e)
 
+def send_log_to_server(status):
+    url = "http://localhost:8080/log/log"
+    now = datetime.datetime.now()
+    c_datetime = now.strftime("%H:%M:%S")
+    if(status!="FALL"):
+        type = "normal"
+    else : type = "emergency"
+
+    data = {
+        "patientid":"dusco01",
+        "content": status,
+        "type" : type,
+        "datetime" : c_datetime
+            }
+    try:
+        response = requests.post(url, json=data)
+        if response.status_code == 200:
+            print("Status successfully sent to server.")
+        else:
+            print("Failed to send status to server. Status code:", response.status_code)
+    except Exception as e:
+        print("An error occurred while sending status to server:", e)
+
 def main():
     packet_buffer = bytearray(512000)
     buffer_idx = 0
@@ -107,7 +131,7 @@ def main():
     target_num = 0
     target = [None] * SRS_MAX_TARGET
     step = 0
-
+    count = 0
 
     # 소켓 초기화
     sock = None
@@ -186,7 +210,7 @@ def main():
                     pos_x, pos_y, status, target_id, reserved_1, reserved_2, reserved_3 = struct.unpack_from('ffIIfff', packet_buffer, buffer_idx)
                     if step < len(target):
                         target[step] = SRS_TARGET_INFO(pos_x, pos_y, status, target_id, [reserved_1, reserved_2, reserved_3])
-                        print(pos_x, pos_y, status)
+                        #print(pos_x, pos_y, status)
                     else:
                         print("skip target.")
                     buffer_idx += struct.calcsize('ffIIfff')
@@ -198,7 +222,7 @@ def main():
                 status_str = "UNKNOWN"
                 status = target[step].status
                 if status == SRS_TARGET_STATUS_WALKING:
-                    status_str = "WALKING"
+                    status_str = "STANDING"
                 elif status == SRS_TARGET_STATUS_LYING:
                     status_str = "LYING"
                 elif status == SRS_TARGET_STATUS_SITTING:
@@ -206,7 +230,13 @@ def main():
                 elif status == SRS_TARGET_STATUS_FALL:
                     status_str = "FALL"
                     send_status_to_server("fall")
+                count = count +1
+                if(count==50):
+                    send_log_to_server(status_str)
+                    count = 0
                 sendToUnity(target[step].id,target[step].posX,target[step].posY,status_str)
+            
+                
                 #print(f"Target[{step}] {{ID: {target[step].id}, X: {target[step].posX:3.2f}, Y: {target[step].posY:3.2f}, Status: {status_str} ({status})}}")
 
     sock.close()
